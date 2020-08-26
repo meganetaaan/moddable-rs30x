@@ -1,13 +1,18 @@
 import Serial from 'serial'
+import Timer from 'timer'
+
+declare function trace(msg: string): void
 
 // type aliases
 type TORQUE_OFF = 0
 type TORQUE_ON = 1
 type TORQUE_BREAK = 2
-type TorqueMode = 
-  | TORQUE_OFF
-  | TORQUE_ON
-  | TORQUE_BREAK
+type TorqueMode = TORQUE_OFF | TORQUE_ON | TORQUE_BREAK
+const TorqeMode: { [key: string]: TorqueMode } = {
+  OFF: 0,
+  ON: 1,
+  BREAK: 2,
+}
 
 // constants
 const COMMANDS = Object.freeze({
@@ -25,7 +30,8 @@ const COMMANDS = Object.freeze({
 // file local methods
 function checksum(arr: number[]) {
   let sum = 0
-  for (let n of arr) {
+  for (const n of arr) {
+    trace(`  checksum: ${n}\n`)
     sum ^= n
   }
   return sum
@@ -36,13 +42,20 @@ class RS30X {
   #id: number
   constructor({ id }: { id: number }) {
     this.#id = id
+    this.#serial.setTimeout(300)
   }
   private _write(command: number[]) {
     const msg = [...COMMANDS.START, this.#id, ...command]
     msg.push(checksum(msg))
+    trace(`writing: ${msg.map((m) => m.toString(16))}\n`)
+    this.#serial.write(Uint8Array.from(msg))
   }
   private _read() {
     return this.#serial.readBytes(26)
+  }
+  private _readStatus() {
+    this._write(COMMANDS.REQUEST_STATUS)
+    return this._read()
   }
   set id(id: number) {
     this._write([...COMMANDS.SET_SERVO_ID, id])
@@ -55,11 +68,19 @@ class RS30X {
   }
   set angle(angle: number) {
     const a = Math.max(-150, Math.min(150, angle)) * 10
+    trace(`setting angle to ${a}\n`)
     this._write([...COMMANDS.SET_ANGLE, a & 0xff, (a & 0xff00) >> 8])
   }
   set torqueMode(mode: TorqueMode) {
     this._write([...COMMANDS.SET_TORQUE, mode])
   }
+
+  public readAngle(): string {
+    return this._readStatus()
+  }
+  // self.__requestStatus(servo_id)
+  //     b = self.ser.read(26)[7:9]
+  //     return struct.unpack("<h", b)[0] / 10.0
   setAngleInTime(angle: number, goalTime: number) {
     const a = Math.max(-150, Math.min(150, angle)) * 10
     const g = goalTime * 100
@@ -69,5 +90,19 @@ class RS30X {
     this._write(COMMANDS.REBOOT)
   }
 }
-const serial = new Serial()
-serial.setTimeout(30)
+const servo = new RS30X({
+  id: 1,
+})
+
+servo.torqueMode = TorqeMode.ON
+
+let flag = false
+Timer.repeat(() => {
+  trace('tick\n')
+  if (flag) {
+    servo.angle = -90
+  } else {
+    servo.angle = 90
+  }
+  flag = !flag
+}, 1000)
