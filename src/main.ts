@@ -48,7 +48,7 @@ class RS30X {
     const msg = [...COMMANDS.START, this.#id, ...command]
     msg.push(checksum(msg))
     trace(`writing: ${msg.map((m) => m.toString(16))}\n`)
-    this.#serial.write(Uint8Array.from(msg))
+    this.#serial.write(Uint8Array.from(msg).buffer)
   }
   private _read() {
     return this.#serial.readBytes(26)
