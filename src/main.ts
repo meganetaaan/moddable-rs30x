@@ -30,8 +30,7 @@ const COMMANDS = Object.freeze({
 // file local methods
 function checksum(arr: number[]) {
   let sum = 0
-  for (const n of arr) {
-    trace(`  checksum: ${n}\n`)
+  for (const n of arr.slice(2)) {
     sum ^= n
   }
   return sum
@@ -100,7 +99,7 @@ let flag = false
 Timer.repeat(() => {
   trace('tick\n')
   if (flag) {
-    servo.angle = -90
+    servo.angle = 120
   } else {
     servo.angle = 90
   }
