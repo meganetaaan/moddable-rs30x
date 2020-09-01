@@ -1,18 +1,18 @@
-# Moddable Project Boilerplate
+# Moddable RS30X
 
-This is a boilerplate for projects with [Moddable SDK](https://www.moddable.com/).
-This repository enhances your developer experience with a number of
-Node.js developer tools that are the de facto standard today.
-
-* TypeScript
-* ESLint
-* Prettier
-* npm
-* Docker devcontainer for VSCode
+This is a driver of RS30X series command servo.
+The driver depends on [Moddable SDK](https://www.moddable.com/).
 
 ## Installation
 
-### With Devcontainer
+in your mcconfig.json
+
+```json
+{
+  "include": ["path/to/this/project/manifest.json"]
+}
+```
+## For developers
 
 * Install the required.
   * VSCode
@@ -33,19 +33,6 @@ $ npm install
 $ xhost +local:
 ```
 
-### without devcontainer
-
-* Install the required
-  * Moddable SDK
-  * Node.js ~10.0
-* Install npm dependencies
-
-```cmd
-$ npm install
-```
-
-## Usage
-
 ### Debug
 
 ```cmd
@@ -57,9 +44,3 @@ $ npm run debug:[m5stack|lin]
 ```cmd
 $ npm run deploy:[m5stack|lin]
 ```
-
-## LICENSE
-
-This boilerplate is distributed under Creative Commons Zero license.
-You can use, modify and redistribute it without notice.
-See [LICENSE](./LICENSE) for the detail.
