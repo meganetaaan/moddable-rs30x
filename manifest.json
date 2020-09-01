@@ -1,23 +1,8 @@
 {
-  "defines": {
-    "serial": {
-      "interface": {
-        "UART": 2
-      },
-      "baud": 115200,
-      "config": {
-        "dataBits": 8,
-        "parity": "#N",
-        "stopBits": 1
-      },
-      "tx_pin": 17,
-      "rx_pin": 16,
-      "trace": 0
-    }
-  },
   "include": [
     "$(MODDABLE)/examples/manifest_base.json",
-    "$(MODDABLE)/contributed/serial/manifest.json"
+    "$(MODDABLE)/contributed/serial/manifest.json",
+    "./manifest-driver.json"
   ],
   "modules": {
     "*": [

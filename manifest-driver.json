@@ -1,0 +1,26 @@
+{
+  "defines": {
+    "serial": {
+      "interface": {
+        "UART": 2
+      },
+      "baud": 115200,
+      "config": {
+        "dataBits": 8,
+        "parity": "#N",
+        "stopBits": 1
+      },
+      "tx_pin": 17,
+      "rx_pin": 16,
+      "trace": 0
+    }
+  },
+  "modules": {
+    "*": [
+      "./rs30x"
+    ]
+  },
+  "preload": [
+    "rs30x"
+  ]
+}
