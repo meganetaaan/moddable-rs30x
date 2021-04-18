@@ -20,6 +20,11 @@ export const TorqeMode: { [key: string]: TorqueMode } = Object.freeze({
   ON: 1,
   BREAK: 2,
 })
+export const Rotation = Object.freeze({
+  CW: 0,
+  CCW: 1,
+})
+export type Rotation = typeof Rotation[keyof typeof Rotation]
 
 // constants
 const COMMANDS = Object.freeze({
@@ -31,6 +36,8 @@ const COMMANDS = Object.freeze({
   SET_TORQUE: Object.freeze([0x00, 0x24, 0x01, 0x01]),
   SET_SERVO_ID: Object.freeze([0x00, 0x04, 0x01, 0x01]),
   SET_MAX_TORQUE: Object.freeze([0x00, 0x23, 0x01, 0x01]),
+  SET_COMPLIANCE_SLOPE_CW: Object.freeze([0x00, 0x1a, 0x01, 0x01]),
+  SET_COMPLIANCE_SLOPE_CCW: Object.freeze([0x00, 0x1b, 0x01, 0x01]),
   SET_DELAY: Object.freeze([0x00, 0x07, 0x01, 0x01]),
   REQUEST_STATUS: Object.freeze([0x09, 0x00, 0x00, 0x01]),
   REBOOT: Object.freeze([0x20, 0xff, 0x00, 0x00]),
@@ -116,6 +123,10 @@ class RS30X {
     const a = Math.max(-150, Math.min(150, angle)) * 10
     const g = goalTime * 100
     this._writeCommand([...COMMANDS.SET_ANGLE_IN_TIME, a & 0xff, (a & 0xff00) >> 8, g & 0xff, (g & 0xff00) >> 8])
+  }
+  setComplianceSlope(rotation: Rotation, angle: number): void {
+    const command = rotation == Rotation.CW ? COMMANDS.SET_COMPLIANCE_SLOPE_CW : COMMANDS.SET_COMPLIANCE_SLOPE_CCW
+    this._writeCommand([...command, angle])
   }
   readStatus(): Status {
     return this._readStatus()
