@@ -23,15 +23,17 @@ export const TorqeMode: { [key: string]: TorqueMode } = Object.freeze({
 
 // constants
 const COMMANDS = Object.freeze({
-  START: [0xfa, 0xaf],
-  FLASH: [0x40, 0xff, 0x00, 0x00],
-  SET_ANGLE: [0x00, 0x1e, 0x02, 0x01],
-  SET_ANGLE_IN_TIME: [0x00, 0x1e, 0x04, 0x01],
-  SET_TORQUE: [0x00, 0x24, 0x01, 0x01],
-  SET_SERVO_ID: [0x00, 0x04, 0x01, 0x01],
-  SET_MAX_TORQUE: [0x00, 0x23, 0x01, 0x01],
-  REQUEST_STATUS: [0x09, 0x00, 0x00, 0x01],
-  REBOOT: [0x20, 0xff, 0x00, 0x00],
+  START: Object.freeze([0xfa, 0xaf]),
+  FLASH: Object.freeze([0x40, 0xff, 0x00, 0x00]),
+  SET_ANGLE: Object.freeze([0x00, 0x1e, 0x02, 0x01]),
+  SET_ANGLE_IN_TIME: Object.freeze([0x00, 0x1e, 0x04, 0x01]),
+  SET_MAX_ANGLE: [],
+  SET_TORQUE: Object.freeze([0x00, 0x24, 0x01, 0x01]),
+  SET_SERVO_ID: Object.freeze([0x00, 0x04, 0x01, 0x01]),
+  SET_MAX_TORQUE: Object.freeze([0x00, 0x23, 0x01, 0x01]),
+  SET_DELAY: Object.freeze([0x00, 0x07, 0x01, 0x01]),
+  REQUEST_STATUS: Object.freeze([0x09, 0x00, 0x00, 0x01]),
+  REBOOT: Object.freeze([0x20, 0xff, 0x00, 0x00]),
 })
 
 // file local methods
@@ -43,16 +45,27 @@ function checksum(arr: number[]) {
   return sum
 }
 
+interface RS30XConstructorParam {
+  id: number
+  serial?: Serial
+}
+
+let staticSerial: Serial
 class RS30X {
-  #serial = new Serial()
+  static serial: Serial
+  #serial: Serial
   #buf = new ArrayBuffer(64)
   #view = new DataView(this.#buf)
   #id: number
-  constructor({ id }: { id: number }) {
+  constructor({ id }: RS30XConstructorParam) {
+    if (staticSerial == null) {
+      staticSerial = new Serial()
+    }
     this.#id = id
+    this.#serial = staticSerial
     this.#serial.setTimeout(5)
   }
-  private _writeCommand(command: number[]) {
+  private _writeCommand(command: readonly number[]) {
     const msg = [...COMMANDS.START, this.#id, ...command]
     msg.push(checksum(msg))
     this.#serial.write(Uint8Array.from(msg).buffer)
@@ -76,10 +89,16 @@ class RS30X {
       voltage,
     }
   }
-  setId(id: number): void {
+  flashId(id: number): void {
     this._writeCommand([...COMMANDS.SET_SERVO_ID, id])
-    this._writeCommand(COMMANDS.FLASH)
     this.#id = id
+    this._writeCommand(COMMANDS.FLASH)
+  }
+  set id(_: number) {
+    throw new Error('cannot set id of single servo. Use "flashId" function')
+  }
+  get id(): number {
+    return this.#id
   }
   setMaxTorque(maxTorque: number): void {
     this._writeCommand([...COMMANDS.SET_MAX_TORQUE, maxTorque])
