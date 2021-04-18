@@ -1,5 +1,4 @@
 import Serial from 'serial'
-import Timer from 'timer'
 
 declare function trace(msg: string): void
 
@@ -11,7 +10,6 @@ type Status = {
   current: number
   temperature: number
   voltage: number
-  raw: number[]
 }
 type TORQUE_OFF = 0
 type TORQUE_ON = 1
@@ -47,32 +45,28 @@ function checksum(arr: number[]) {
 
 class RS30X {
   #serial = new Serial()
-  #buf = new ArrayBuffer(26)
+  #buf = new ArrayBuffer(64)
   #view = new DataView(this.#buf)
   #id: number
   constructor({ id }: { id: number }) {
     this.#id = id
-    this.#serial.setTimeout(300)
+    this.#serial.setTimeout(5)
   }
   private _writeCommand(command: number[]) {
     const msg = [...COMMANDS.START, this.#id, ...command]
     msg.push(checksum(msg))
-    trace(`writing: ${msg.map((m) => m.toString(16))}\n`)
     this.#serial.write(Uint8Array.from(msg).buffer)
+    this.#serial.readBytes(this.#buf, msg.length)
   }
   private _readStatus(): Status {
     this._writeCommand(COMMANDS.REQUEST_STATUS)
     this.#serial.readBytes(this.#buf, 26)
     const angle = this.#view.getUint16(7, true) / 10
     const time = this.#view.getUint16(9, true) * 10
-    const speed = this.#view.getUint16(11, true)
+    const speed = this.#view.getInt16(11, true)
     const current = this.#view.getUint16(13, true)
     const temperature = this.#view.getUint16(15, true)
     const voltage = this.#view.getUint16(17, true) * 10
-    const array = []
-    for (let i = 0; i < 26; i++) {
-      array.push(this.#view.getUint8(i))
-    }
     return {
       angle,
       time,
@@ -80,7 +74,6 @@ class RS30X {
       current,
       temperature,
       voltage,
-      raw: array,
     }
   }
   setId(id: number): void {
