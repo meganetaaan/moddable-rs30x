@@ -1,6 +1,6 @@
 declare function trace(msg: any): void
 import Timer from 'timer'
-import RS30X, { TorqeMode } from 'rs30x'
+import RS30X, { Rotation, RS30XBatch, TorqeMode } from 'rs30x'
 
 const pan = new RS30X({
   id: 1,
@@ -11,6 +11,10 @@ const tilt = new RS30X({
 // tilt.flashId(2)
 pan.setTorqueMode(TorqeMode.ON)
 tilt.setTorqueMode(TorqeMode.ON)
+tilt.setComplianceSlope(Rotation.CW, 0x24)
+tilt.setComplianceSlope(Rotation.CCW, 0x24)
+
+const batch = new RS30XBatch([pan, tilt])
 
 Timer.repeat(() => {
   const status = pan.readStatus()
@@ -19,22 +23,22 @@ Timer.repeat(() => {
   )
 }, 100)
 
-let flag = false
+// let flag = false
 Timer.repeat(() => {
+  batch.playMotion({
+    duration: 2000,
+    cuePoints: [0, 0.1, 0.2, 0.3, 0.5, 1.0],
+    keyFrames: [
+      [null, null, 20, null, null, 140],
+      [null, 20, 40, 60, 80, 100],
+    ],
+  })
+  /*
   if (flag) {
     pan.setAngleInTime(120, 0.5)
   } else {
     pan.setAngleInTime(90, 1.5)
   }
   flag = !flag
-}, 2000)
-
-let flag2 = false
-Timer.repeat(() => {
-  if (flag2) {
-    tilt.setAngleInTime(180, 1.0)
-  } else {
-    tilt.setAngleInTime(90, 0.3)
-  }
-  flag2 = !flag2
-}, 1500)
+  */
+}, 3000)

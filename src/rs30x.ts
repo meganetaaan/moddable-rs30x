@@ -1,4 +1,5 @@
 import Serial from 'serial'
+import Timer from 'timer'
 
 declare function trace(msg: string): void
 
@@ -41,6 +42,8 @@ const COMMANDS = Object.freeze({
   SET_DELAY: Object.freeze([0x00, 0x07, 0x01, 0x01]),
   REQUEST_STATUS: Object.freeze([0x09, 0x00, 0x00, 0x01]),
   REBOOT: Object.freeze([0x20, 0xff, 0x00, 0x00]),
+  SET_ANGLES: Object.freeze([0x00, 0x1e, 0x03]),
+  SET_ANGLES_IN_TIME: Object.freeze([0x00, 0x1e, 0x05]),
 })
 
 // file local methods
@@ -133,6 +136,83 @@ class RS30X {
   }
   reboot(): void {
     this._writeCommand(COMMANDS.REBOOT)
+  }
+}
+
+interface Motion {
+  duration?: number
+  cuePoints?: number[]
+  keyFrames: (number | null)[][]
+}
+export class RS30XBatch {
+  #servos: RS30X[]
+  #length: number
+  #serial: Serial
+  #buf: ArrayBuffer
+  #ids: number[]
+  constructor(servos: RS30X[]) {
+    if (staticSerial == null) {
+      staticSerial = new Serial()
+    }
+    this.#serial = staticSerial
+    this.#servos = servos.slice()
+    this.#length = servos.length
+    this.#buf = new ArrayBuffer(5 + this.#length * 5)
+    this.#ids = servos.map((s) => s.id)
+  }
+  playMotion(target: Motion): void {
+    const { duration = 1000, cuePoints = [0, 1] } = target
+    const keyFrames = target.keyFrames
+    const numFrames = cuePoints.length
+    const last = new Array(this.#length).fill(0)
+    const idx = new Array(this.#length).fill(0)
+    let current = 0
+    for (let i = 0; i < numFrames; i++) {
+      const values = []
+      const time = (cuePoints[i] ?? 1) * duration
+      if (time == null) {
+        continue
+      }
+      for (let j = 0; j < this.#length; j++) {
+        let t = time
+        const id = this.#ids[j]
+        let angle
+        let k = idx[j]
+        if (k > i) {
+          continue
+        }
+        while (k < numFrames) {
+          angle = keyFrames[j][k]
+          if (angle != null) {
+            t = (cuePoints[k] ?? 1) * duration - last[j]
+            idx[j] = k + 1
+            break
+          }
+          k++
+        }
+        if (angle == null) {
+          continue
+        }
+        const a = Math.max(-180, Math.min(180, angle)) * 10
+        const g = t / 10
+        last[j] = t
+        values.push(id)
+        values.push(a & 0xff)
+        values.push((a & 0xff00) >> 8)
+        values.push(g & 0xff)
+        values.push((g & 0xff00) >> 8)
+      }
+      const numCommands = values.length / 5
+      if (numCommands > 0) {
+        const command = [...COMMANDS.START, 0x00, ...COMMANDS.SET_ANGLES_IN_TIME, numCommands, ...values]
+        command.push(checksum(command))
+        trace(JSON.stringify(command) + '\n')
+        this.#serial.write(Uint8Array.from(command).buffer)
+        this.#serial.readBytes(this.#buf, command.length)
+      }
+      Timer.delay(time - current)
+      current = time
+    }
   }
 }
 
