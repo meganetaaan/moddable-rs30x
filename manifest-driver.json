@@ -1,4 +1,7 @@
 {
+  "include": [
+    "$(MODDABLE)/contributed/serial/manifest.json"
+  ],
   "defines": {
     "serial": {
       "interface": {

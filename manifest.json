@@ -1,7 +1,6 @@
 {
   "include": [
     "$(MODDABLE)/examples/manifest_base.json",
-    "$(MODDABLE)/contributed/serial/manifest.json",
     "./manifest-driver.json"
   ],
   "modules": {
