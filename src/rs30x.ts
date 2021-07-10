@@ -62,34 +62,33 @@ interface RS30XConstructorParam {
 
 let staticSerial: Serial
 class RS30X {
-  static serial: Serial
-  #serial: Serial
-  #buf = new ArrayBuffer(64)
-  #view = new DataView(this.#buf)
-  #id: number
+  _serial: Serial
+  _buf = new ArrayBuffer(64)
+  _view = new DataView(this._buf)
+  _id: number
   constructor({ id }: RS30XConstructorParam) {
     if (staticSerial == null) {
       staticSerial = new Serial()
     }
-    this.#id = id
-    this.#serial = staticSerial
-    this.#serial.setTimeout(5)
+    this._id = id
+    this._serial = staticSerial
+    this._serial.setTimeout(5)
   }
   private _writeCommand(command: readonly number[]) {
-    const msg = [...COMMANDS.START, this.#id, ...command]
+    const msg = [...COMMANDS.START, this._id, ...command]
     msg.push(checksum(msg))
-    this.#serial.write(Uint8Array.from(msg).buffer)
-    this.#serial.readBytes(this.#buf, msg.length)
+    this._serial.write(Uint8Array.from(msg).buffer)
+    this._serial.readBytes(this._buf, msg.length)
   }
   private _readStatus(): Status {
     this._writeCommand(COMMANDS.REQUEST_STATUS)
-    this.#serial.readBytes(this.#buf, 26)
-    const angle = this.#view.getUint16(7, true) / 10
-    const time = this.#view.getUint16(9, true) * 10
-    const speed = this.#view.getInt16(11, true)
-    const current = this.#view.getUint16(13, true)
-    const temperature = this.#view.getUint16(15, true)
-    const voltage = this.#view.getUint16(17, true) * 10
+    this._serial.readBytes(this._buf, 26)
+    const angle = this._view.getUint16(7, true) / 10
+    const time = this._view.getUint16(9, true) * 10
+    const speed = this._view.getInt16(11, true)
+    const current = this._view.getUint16(13, true)
+    const temperature = this._view.getUint16(15, true)
+    const voltage = this._view.getUint16(17, true) * 10
     return {
       angle,
       time,
@@ -101,14 +100,14 @@ class RS30X {
   }
   flashId(id: number): void {
     this._writeCommand([...COMMANDS.SET_SERVO_ID, id])
-    this.#id = id
+    this._id = id
     this._writeCommand(COMMANDS.FLASH)
   }
   set id(_: number) {
     throw new Error('cannot set id of single servo. Use "flashId" function')
   }
   get id(): number {
-    return this.#id
+    return this._id
   }
   setMaxTorque(maxTorque: number): void {
     this._writeCommand([...COMMANDS.SET_MAX_TORQUE, maxTorque])
@@ -145,27 +144,27 @@ interface Motion {
   keyFrames: (number | null)[][]
 }
 export class RS30XBatch {
-  #servos: RS30X[]
-  #length: number
-  #serial: Serial
-  #buf: ArrayBuffer
-  #ids: number[]
+  _servos: RS30X[]
+  _length: number
+  _serial: Serial
+  _buf: ArrayBuffer
+  _ids: number[]
   constructor(servos: RS30X[]) {
     if (staticSerial == null) {
       staticSerial = new Serial()
     }
-    this.#serial = staticSerial
-    this.#servos = servos.slice()
-    this.#length = servos.length
-    this.#buf = new ArrayBuffer(5 + this.#length * 5)
-    this.#ids = servos.map((s) => s.id)
+    this._serial = staticSerial
+    this._servos = servos.slice()
+    this._length = servos.length
+    this._buf = new ArrayBuffer(5 + this._length * 5)
+    this._ids = servos.map((s) => s.id)
   }
   playMotion(target: Motion): void {
     const { duration = 1000, cuePoints = [0, 1] } = target
     const keyFrames = target.keyFrames
     const numFrames = cuePoints.length
-    const last = new Array(this.#length).fill(0)
-    const idx = new Array(this.#length).fill(0)
+    const last = new Array(this._length).fill(0)
+    const idx = new Array(this._length).fill(0)
     let current = 0
     for (let i = 0; i < numFrames; i++) {
       const values = []
@@ -173,9 +172,9 @@ export class RS30XBatch {
       if (time == null) {
         continue
       }
-      for (let j = 0; j < this.#length; j++) {
+      for (let j = 0; j < this._length; j++) {
         let t = time
-        const id = this.#ids[j]
+        const id = this._ids[j]
         let angle
         let k = idx[j]
         if (k > i) {
@@ -207,8 +206,8 @@ export class RS30XBatch {
         const command = [...COMMANDS.START, 0x00, ...COMMANDS.SET_ANGLES_IN_TIME, numCommands, ...values]
         command.push(checksum(command))
         trace(JSON.stringify(command) + '\n')
-        this.#serial.write(Uint8Array.from(command).buffer)
-        this.#serial.readBytes(this.#buf, command.length)
+        this._serial.write(Uint8Array.from(command).buffer)
+        this._serial.readBytes(this._buf, command.length)
       }
       Timer.delay(time - current)
       current = time
