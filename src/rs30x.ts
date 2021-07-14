@@ -83,12 +83,12 @@ class RS30X {
   private _readStatus(): Status {
     this._writeCommand(COMMANDS.REQUEST_STATUS)
     this._serial.readBytes(this._buf, 26)
-    const angle = this._view.getUint16(7, true) / 10
+    const angle = this._view.getInt16(7, true) / 10
     const time = this._view.getUint16(9, true) * 10
     const speed = this._view.getInt16(11, true)
     const current = this._view.getUint16(13, true)
     const temperature = this._view.getUint16(15, true)
-    const voltage = this._view.getUint16(17, true) * 10
+    const voltage = this._view.getInt16(17, true) * 10
     return {
       angle,
       time,
