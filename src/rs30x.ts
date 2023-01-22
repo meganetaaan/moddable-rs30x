@@ -1,7 +1,6 @@
-import Serial from 'serial'
+import Serial from 'embedded:io/serial'
 import Timer from 'timer'
-
-declare function trace(msg: string): void
+import config from 'mc/config'
 
 // type aliases
 type Status = {
@@ -16,6 +15,7 @@ type TORQUE_OFF = 0
 type TORQUE_ON = 1
 type TORQUE_BREAK = 2
 type TorqueMode = TORQUE_OFF | TORQUE_ON | TORQUE_BREAK
+
 export const TorqeMode: { [key: string]: TorqueMode } = Object.freeze({
   OFF: 0,
   ON: 1,
@@ -44,174 +44,276 @@ const COMMANDS = Object.freeze({
   REBOOT: Object.freeze([0x20, 0xff, 0x00, 0x00]),
   SET_ANGLES: Object.freeze([0x00, 0x1e, 0x03]),
   SET_ANGLES_IN_TIME: Object.freeze([0x00, 0x1e, 0x05]),
-})
+} as const)
 
+const PACKET_TYPE = {
+  COMMAND: 0xFAAF,
+  RESPONSE: 0xFDDF,
+} as const
+type PacketType = typeof PACKET_TYPE[keyof typeof PACKET_TYPE]
+
+// utilities
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v))
+}
+function be(v: number): [number, number] {
+  return [v & 0xff, (v & 0xff00) >> 8]
+}
+function eb(l: number, h: number) {
+  return ((h << 8) & 0xff00) + (l & 0xff)
+}
+function le(v: number): [number, number] {
+  return [(v & 0xff00) >> 8, v & 0xff]
+}
+function el(h: number, l: number) {
+  return ((h << 8) & 0xff00) + (l & 0xff)
+}
+
+/**
+ * calculates checksum of the SCS packets
+ * @param arr packet array except checksum
+ * @returns checksum number
+ */
 // file local methods
-function checksum(arr: number[]) {
+function checksum(arr: number[] | Uint8Array): number {
   let sum = 0
-  for (const n of arr.slice(2)) {
+  for (const n of arr) {
     sum ^= n
   }
   return sum
 }
 
-interface RS30XConstructorParam {
-  id: number
-  serial?: Serial
+const RX_STATE = {
+  SEEK: 0,
+  HEAD: 1,
+  BODY: 2,
+} as const
+type RxState = typeof RX_STATE[keyof typeof RX_STATE]
+
+class PacketHandler extends Serial {
+  #callbacks: Map<number, (bytes: number[]) => void>
+  #rxBuffer: Uint8Array
+  #idx: number
+  #state: RxState
+  #count: number = 0
+  constructor(option: any) {
+    const onReadable = function (this: PacketHandler, bytes: number) {
+      const rxBuf = this.#rxBuffer
+      while (bytes > 0) {
+        // NOTE: We can safely read a number
+        rxBuf[this.#idx++] = this.read() as number
+        bytes -= 1
+        switch (this.#state) {
+          case RX_STATE.SEEK:
+            if (this.#idx >= 2) {
+              // see header
+              const header = el(rxBuf[0], rxBuf[1])
+              if (header === PACKET_TYPE.COMMAND || header === PACKET_TYPE.RESPONSE) {
+                // packet found
+                this.#state = RX_STATE.HEAD
+              } else {
+                // reset seek
+                // trace('seeking failed. reset\n')
+                this.#idx = 0
+              }
+            }
+            break
+          case RX_STATE.HEAD:
+            if (this.#idx >= 6) {
+              this.#count = rxBuf[5] + 2
+              this.#state = RX_STATE.BODY
+            }
+            break
+          case RX_STATE.BODY:
+            this.#count -= 1
+            if (this.#count === 0) {
+              // trace('received packet!\n')
+              const cs = checksum(rxBuf.slice(2, this.#idx - 1)) & 0xff
+              const id = rxBuf[2]
+              const header = el(rxBuf[0], rxBuf[1])
+              if (header === PACKET_TYPE.COMMAND) {
+                trace(`got echo.  ... ${rxBuf.slice(0, this.#idx)} ignoring\n`)
+              } else if (cs === rxBuf[this.#idx - 1] && this.#callbacks.has(id)) {
+                // trace(`got response for ${id}. triggering callback \n`)
+                this.#callbacks.get(id)?.(Array.from(rxBuf.slice(7, this.#idx - 1)))
+              } else {
+                trace(`unknown packet for ${id} ... ${rxBuf.slice(0, this.#idx)}. ignoring\n`)
+              }
+              this.#idx = 0
+              this.#state = RX_STATE.SEEK
+            }
+            break
+          default:
+            // @ts-ignore 6113
+            let _state: never
+        }
+        // noop
+      }
+    }
+    super({
+      ...option,
+      format: 'number',
+      onReadable,
+    })
+    this.#callbacks = new Map<number, () => void>()
+    this.#rxBuffer = new Uint8Array(64)
+    this.#idx = 0
+    this.#state = RX_STATE.SEEK
+  }
+  hasCallbackOf(id: number): boolean {
+    return this.#callbacks.has(id)
+  }
+  registerCallback(id: number, callback: (bytes: number[]) => void) {
+    this.#callbacks.set(id, callback)
+  }
+  removeCallback(id: number) {
+    this.#callbacks.delete(id)
+  }
 }
 
-let staticSerial: Serial
+type RS30XConstructorParam = {
+  id: number
+}
+
 class RS30X {
-  _serial: Serial
-  _buf = new ArrayBuffer(64)
-  _view = new DataView(this._buf)
-  _id: number
+  static packetHandler: PacketHandler
+  #id: number
+  #onCommandRead: (values: number[]) => void
+  #txBuf: Uint8Array
+  #promises: Array<[(values: number[]) => void, Timer]>
+  #offset: number
   constructor({ id }: RS30XConstructorParam) {
-    if (staticSerial == null) {
-      staticSerial = new Serial()
+    this.#id = id
+    this.#promises = []
+    this.#offset = 0
+    this.#onCommandRead = (values) => {
+      if (this.#promises.length > 0) {
+        const [resolver, timeoutId] = this.#promises.shift()
+        Timer.clear(timeoutId)
+        resolver(values)
+      }
     }
-    this._id = id
-    this._serial = staticSerial
-    this._serial.setTimeout(5)
-  }
-  private _writeCommand(command: readonly number[]) {
-    const msg = [...COMMANDS.START, this._id, ...command]
-    msg.push(checksum(msg))
-    this._serial.write(Uint8Array.from(msg).buffer)
-    this._serial.readBytes(this._buf, msg.length)
-  }
-  private _readStatus(): Status {
-    this._writeCommand(COMMANDS.REQUEST_STATUS)
-    this._serial.readBytes(this._buf, 26)
-    const angle = this._view.getInt16(7, true) / 10
-    const time = this._view.getUint16(9, true) * 10
-    const speed = this._view.getInt16(11, true)
-    const current = this._view.getUint16(13, true)
-    const temperature = this._view.getUint16(15, true)
-    const voltage = this._view.getInt16(17, true) * 10
-    return {
-      angle,
-      time,
-      speed,
-      current,
-      temperature,
-      voltage,
+    this.#txBuf = new Uint8Array(64)
+    if (RS30X.packetHandler == null) {
+      RS30X.packetHandler = new PacketHandler({
+        receive: config.serial?.receive ?? 16,
+        transmit: config.serial?.transmit ?? 17,
+        baud: 115_200,
+        port: 2,
+      })
     }
+    if (RS30X.packetHandler.hasCallbackOf(id)) {
+      throw new Error('This id is already instantiated')
+    }
+    RS30X.packetHandler.registerCallback(this.#id, this.#onCommandRead)
   }
-  flashId(id: number): void {
-    this._writeCommand([...COMMANDS.SET_SERVO_ID, id])
-    this._id = id
-    this._writeCommand(COMMANDS.FLASH)
+  teardown(): void {
+    RS30X.packetHandler.removeCallback(this.#id)
   }
+
   set id(_: number) {
     throw new Error('cannot set id of single servo. Use "flashId" function')
   }
   get id(): number {
-    return this._id
+    return this.#id
   }
-  setMaxTorque(maxTorque: number): void {
-    this._writeCommand([...COMMANDS.SET_MAX_TORQUE, maxTorque])
-    this._writeCommand(COMMANDS.FLASH)
+
+  async #sendCommand(...values: number[]): Promise<number[] | undefined> {
+    this.#txBuf[0] = 0xfa
+    this.#txBuf[1] = 0xaf
+    this.#txBuf[2] = this.#id
+    let idx = 3
+    for (const v of values) {
+      this.#txBuf[idx] = v
+      idx++
+    }
+    this.#txBuf[idx] = checksum(this.#txBuf.slice(2, idx))
+    idx++
+    // trace(`writing: ${this.#txBuf.slice(0, idx)}\n`)
+    trace('sending: [')
+    for (let i = 0; i < idx; i++) {
+      trace('0x' + this.#txBuf[i].toString(16).padStart(2, '0') + ', ')
+    }
+    trace(']\n')
+    for (let i = 0; i < idx; i++) {
+      RS30X.packetHandler.write(this.#txBuf[i])
+    }
+    return new Promise((resolve, _reject) => {
+      const id = Timer.set(() => {
+        this.#promises.shift()
+        trace(`timeout. ${this.#promises.length}\n`)
+        resolve(undefined)
+      }, 40)
+      this.#promises.push([resolve, id])
+    })
   }
-  setAngle(angle: number): void {
+
+  async setMaxTorque(maxTorque: number): Promise<void> {
+    await this.#sendCommand(...COMMANDS.SET_MAX_TORQUE, maxTorque)
+    await this.#sendCommand(...COMMANDS.FLASH)
+  }
+  async flashId(id: number): Promise<void> {
+    await this.#sendCommand(...COMMANDS.SET_SERVO_ID, id)
+    this.#id = id
+    await this.#sendCommand(...COMMANDS.FLASH)
+  }
+
+  /**
+   * sets angle immediately
+   * @param angle angle(degree)
+   * @returns TBD
+   */
+  async setAngle(angle: number): Promise<void> {
     const a = Math.max(-150, Math.min(150, angle)) * 10
     trace(`setting angle to ${a}\n`)
-    this._writeCommand([...COMMANDS.SET_ANGLE, a & 0xff, (a & 0xff00) >> 8])
+    await this.#sendCommand(...COMMANDS.SET_ANGLE, ...be(a))
   }
-  setTorqueMode(mode: TorqueMode): void {
-    this._writeCommand([...COMMANDS.SET_TORQUE, mode])
-  }
-  setAngleInTime(angle: number, goalTime: number): void {
+
+  /**
+   * sets angle within goal time
+   * @param angle angle(degree)
+   * @param goalTime time(millisecond)
+   * @returns TBD
+   */
+  async setAngleInTime(angle: number, goalTime: number): Promise<void> {
     const a = Math.max(-150, Math.min(150, angle)) * 10
     const g = goalTime * 100
-    this._writeCommand([...COMMANDS.SET_ANGLE_IN_TIME, a & 0xff, (a & 0xff00) >> 8, g & 0xff, (g & 0xff00) >> 8])
+    await this.#sendCommand(...COMMANDS.SET_ANGLE_IN_TIME, ...be(a), ...be(g))
   }
-  setComplianceSlope(rotation: Rotation, angle: number): void {
-    const command = rotation == Rotation.CW ? COMMANDS.SET_COMPLIANCE_SLOPE_CW : COMMANDS.SET_COMPLIANCE_SLOPE_CCW
-    this._writeCommand([...command, angle])
-  }
-  readStatus(): Status {
-    return this._readStatus()
-  }
-  reboot(): void {
-    this._writeCommand(COMMANDS.REBOOT)
-  }
-}
 
-interface Motion {
-  duration?: number
-  cuePoints?: number[]
-  keyFrames: (number | null)[][]
-}
-export class RS30XBatch {
-  _servos: RS30X[]
-  _length: number
-  _serial: Serial
-  _buf: ArrayBuffer
-  _ids: number[]
-  constructor(servos: RS30X[]) {
-    if (staticSerial == null) {
-      staticSerial = new Serial()
-    }
-    this._serial = staticSerial
-    this._servos = servos.slice()
-    this._length = servos.length
-    this._buf = new ArrayBuffer(5 + this._length * 5)
-    this._ids = servos.map((s) => s.id)
+  async setComplianceSlope(rotation: Rotation, angle: number): Promise<void> {
+    const command = rotation == Rotation.CW ? COMMANDS.SET_COMPLIANCE_SLOPE_CW : COMMANDS.SET_COMPLIANCE_SLOPE_CCW
+    this.#sendCommand(...command, angle)
   }
-  playMotion(target: Motion): void {
-    const { duration = 1000, cuePoints = [0, 1] } = target
-    const keyFrames = target.keyFrames
-    const numFrames = cuePoints.length
-    const last = new Array(this._length).fill(0)
-    const idx = new Array(this._length).fill(0)
-    let current = 0
-    for (let i = 0; i < numFrames; i++) {
-      const values = []
-      const time = (cuePoints[i] ?? 1) * duration
-      if (time == null) {
-        continue
-      }
-      for (let j = 0; j < this._length; j++) {
-        let t = time
-        const id = this._ids[j]
-        let angle
-        let k = idx[j]
-        if (k > i) {
-          continue
-        }
-        while (k < numFrames) {
-          angle = keyFrames[j][k]
-          if (angle != null) {
-            t = (cuePoints[k] ?? 1) * duration - last[j]
-            idx[j] = k + 1
-            break
-          }
-          k++
-        }
-        if (angle == null) {
-          continue
-        }
-        const a = Math.max(-180, Math.min(180, angle)) * 10
-        const g = t / 10
-        last[j] = t
-        values.push(id)
-        values.push(a & 0xff)
-        values.push((a & 0xff00) >> 8)
-        values.push(g & 0xff)
-        values.push((g & 0xff00) >> 8)
-      }
-      const numCommands = values.length / 5
-      if (numCommands > 0) {
-        const command = [...COMMANDS.START, 0x00, ...COMMANDS.SET_ANGLES_IN_TIME, numCommands, ...values]
-        command.push(checksum(command))
-        trace(JSON.stringify(command) + '\n')
-        this._serial.write(Uint8Array.from(command).buffer)
-        this._serial.readBytes(this._buf, command.length)
-      }
-      Timer.delay(time - current)
-      current = time
+
+  async reboot(): Promise<void> {
+    this.#sendCommand(...COMMANDS.REBOOT)
+  }
+
+  /**
+   * sets torque
+   * @param enable enable
+   * @returns TBD
+   */
+  async setTorque(enable: boolean): Promise<unknown> {
+    const mode = enable ? TorqeMode.ON : TorqeMode.OFF
+    return this.#sendCommand(...COMMANDS.SET_TORQUE, mode)
+  }
+
+  /**
+   * reads servo's present status
+   * @returns angle(degree)
+   */
+  async readStatus(): Promise<number> {
+    const values = await this.#sendCommand(...COMMANDS.REQUEST_STATUS)
+    if (values == null || values.length < 18) {
+      throw new Error('response corrupted')
     }
+    const angle = eb(values[0], values[1])
+    if (angle >= (65535 / 2)) {
+      return (angle - 65535) / 10
+    }
+    return angle / 10
   }
 }
 
