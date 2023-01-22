@@ -1,44 +1,51 @@
-declare function trace(msg: any): void
 import Timer from 'timer'
-import RS30X, { Rotation, RS30XBatch, TorqeMode } from 'rs30x'
+import RS30X from 'rs30x'
+declare const button: {
+  [key: string]: {
+    onChanged: (this: { read: () => number }) => void
+  }
+}
 
-const pan = new RS30X({
+const servo = new RS30X({
   id: 1,
 })
-const tilt = new RS30X({
+
+const servo2 = new RS30X({
   id: 2,
 })
-// tilt.flashId(2)
-pan.setTorqueMode(TorqeMode.ON)
-tilt.setTorqueMode(TorqeMode.ON)
-tilt.setComplianceSlope(Rotation.CW, 0x24)
-tilt.setComplianceSlope(Rotation.CCW, 0x24)
 
-const batch = new RS30XBatch([pan, tilt])
+let torqueEnabled = true
+let angle = 0
+let tick = 10
 
-Timer.repeat(() => {
-  const status = pan.readStatus()
-  trace(
-    `angle: ${status.angle}, time: ${status.time}, speed: ${status.speed}, current: ${status.current}, voltage: ${status.voltage}\n`
-  )
-}, 100)
-
-// let flag = false
-Timer.repeat(() => {
-  batch.playMotion({
-    duration: 2000,
-    cuePoints: [0, 0.1, 0.2, 0.3, 0.5, 1.0],
-    keyFrames: [
-      [null, null, 20, null, null, 140],
-      [null, 20, 40, 60, 80, 100],
-    ],
-  })
-  /*
-  if (flag) {
-    pan.setAngleInTime(120, 0.5)
-  } else {
-    pan.setAngleInTime(90, 1.5)
+async function writeTest() {
+  angle += tick
+  if (angle >= 200 || angle <= 0) {
+    tick = -tick
   }
-  flag = !flag
-  */
-}, 3000)
+  await servo.setTorque(true)
+  // await servo2.setTorque(true)
+  await servo.setAngleInTime(angle - 100, 0.5)
+  // await servo2.setAngleInTime(angle - 100, 0.5)
+}
+
+async function readTest() {
+  for (let srv of [servo, servo2]) {
+    let angle = await srv.readStatus().catch(e => {
+      trace(e + '\n')
+    })
+    trace(`${srv.id}...current angle: ${angle}\n`)
+  }
+}
+
+button.a.onChanged = function () {
+  if (!this.read()) {
+    writeTest()
+  }
+}
+
+button.b.onChanged = function () {
+  if (!this.read() && servo.id !== 2) {
+    readTest()
+  }
+}
