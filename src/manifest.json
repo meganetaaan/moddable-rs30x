@@ -3,7 +3,9 @@
     "$(MODDABLE)/examples/manifest_base.json",
     "./manifest-driver.json"
   ],
-  "startupSound": false,
+  "config": {
+    "startupSound": false
+  },
   "modules": {
     "*": [
       "./main"
