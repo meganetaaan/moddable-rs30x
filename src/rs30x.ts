@@ -31,15 +31,15 @@ export type Rotation = typeof Rotation[keyof typeof Rotation]
 const COMMANDS = Object.freeze({
   START: Object.freeze([0xfa, 0xaf]),
   FLASH: Object.freeze([0x40, 0xff, 0x00, 0x00]),
-  SET_ANGLE: Object.freeze([0x00, 0x1e, 0x02, 0x01]),
-  SET_ANGLE_IN_TIME: Object.freeze([0x00, 0x1e, 0x04, 0x01]),
+  SET_ANGLE: Object.freeze([0x03, 0x1e, 0x02, 0x01]),
+  SET_ANGLE_IN_TIME: Object.freeze([0x03, 0x1e, 0x04, 0x01]),
   SET_MAX_ANGLE: [],
-  SET_TORQUE: Object.freeze([0x00, 0x24, 0x01, 0x01]),
-  SET_SERVO_ID: Object.freeze([0x00, 0x04, 0x01, 0x01]),
-  SET_MAX_TORQUE: Object.freeze([0x00, 0x23, 0x01, 0x01]),
-  SET_COMPLIANCE_SLOPE_CW: Object.freeze([0x00, 0x1a, 0x01, 0x01]),
-  SET_COMPLIANCE_SLOPE_CCW: Object.freeze([0x00, 0x1b, 0x01, 0x01]),
-  SET_DELAY: Object.freeze([0x00, 0x07, 0x01, 0x01]),
+  SET_TORQUE: Object.freeze([0x03, 0x24, 0x01, 0x01]),
+  SET_SERVO_ID: Object.freeze([0x03, 0x04, 0x01, 0x01]),
+  SET_MAX_TORQUE: Object.freeze([0x03, 0x23, 0x01, 0x01]),
+  SET_COMPLIANCE_SLOPE_CW: Object.freeze([0x03, 0x1a, 0x01, 0x01]),
+  SET_COMPLIANCE_SLOPE_CCW: Object.freeze([0x03, 0x1b, 0x01, 0x01]),
+  SET_DELAY: Object.freeze([0x03, 0x07, 0x01, 0x01]),
   REQUEST_STATUS: Object.freeze([0x09, 0x00, 0x00, 0x01]),
   REBOOT: Object.freeze([0x20, 0xff, 0x00, 0x00]),
   SET_ANGLES: Object.freeze([0x00, 0x1e, 0x03]),
@@ -134,7 +134,7 @@ class PacketHandler extends Serial {
               if (header === PACKET_TYPE.COMMAND) {
                 trace(`got echo.  ... ${rxBuf.slice(0, this.#idx)} ignoring\n`)
               } else if (cs === rxBuf[this.#idx - 1] && this.#callbacks.has(id)) {
-                // trace(`got response for ${id}. triggering callback \n`)
+                trace(`got response for ${id}. triggering callback \n`)
                 this.#callbacks.get(id)?.(Array.from(rxBuf.slice(7, this.#idx - 1)))
               } else {
                 trace(`unknown packet for ${id} ... ${rxBuf.slice(0, this.#idx)}. ignoring\n`)
@@ -230,11 +230,11 @@ class RS30X {
     this.#txBuf[idx] = checksum(this.#txBuf.slice(2, idx))
     idx++
     // trace(`writing: ${this.#txBuf.slice(0, idx)}\n`)
-    trace('sending: [')
-    for (let i = 0; i < idx; i++) {
-      trace('0x' + this.#txBuf[i].toString(16).padStart(2, '0') + ', ')
-    }
-    trace(']\n')
+    // trace('sending: [')
+    // for (let i = 0; i < idx; i++) {
+    //   trace('0x' + this.#txBuf[i].toString(16).padStart(2, '0') + ', ')
+    // }
+    // trace(']\n')
     for (let i = 0; i < idx; i++) {
       RS30X.packetHandler.write(this.#txBuf[i])
     }
@@ -243,7 +243,7 @@ class RS30X {
         this.#promises.shift()
         trace(`timeout. ${this.#promises.length}\n`)
         resolve(undefined)
-      }, 40)
+      }, 100)
       this.#promises.push([resolve, id])
     })
   }
@@ -265,7 +265,6 @@ class RS30X {
    */
   async setAngle(angle: number): Promise<void> {
     const a = Math.max(-150, Math.min(150, angle)) * 10
-    trace(`setting angle to ${a}\n`)
     await this.#sendCommand(...COMMANDS.SET_ANGLE, ...be(a))
   }
 
