@@ -24,9 +24,13 @@ async function writeTest() {
     tick = -tick
   }
   await servo.setTorque(true)
-  // await servo2.setTorque(true)
+  await servo2.setTorque(true)
   await servo.setAngleInTime(angle - 100, 0.5)
-  // await servo2.setAngleInTime(angle - 100, 0.5)
+  await servo2.setAngleInTime((angle - 100) * 0.1, 0.5)
+  Timer.set(async () => {
+    await servo.setTorque(false)
+    await servo2.setTorque(false)
+  }, 600)
 }
 
 async function readTest() {
