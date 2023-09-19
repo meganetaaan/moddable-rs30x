@@ -132,9 +132,9 @@ class PacketHandler extends Serial {
               const id = rxBuf[2]
               const header = el(rxBuf[0], rxBuf[1])
               if (header === PACKET_TYPE.COMMAND) {
-                trace(`got echo.  ... ${rxBuf.slice(0, this.#idx)} ignoring\n`)
+                // trace(`got echo.  ... ${rxBuf.slice(0, this.#idx)} ignoring\n`)
               } else if (cs === rxBuf[this.#idx - 1] && this.#callbacks.has(id)) {
-                trace(`got response for ${id}. triggering callback \n`)
+                // trace(`got response for ${id}. triggering callback \n`)
                 this.#callbacks.get(id)?.(Array.from(rxBuf.slice(7, this.#idx - 1)))
               } else {
                 trace(`unknown packet for ${id} ... ${rxBuf.slice(0, this.#idx)}. ignoring\n`)
