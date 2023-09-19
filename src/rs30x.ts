@@ -175,8 +175,8 @@ type RS30XConstructorParam = {
   id: number
 }
 
+let packetHandler: PacketHandler = null
 class RS30X {
-  static packetHandler: PacketHandler
   #id: number
   #onCommandRead: (values: number[]) => void
   #txBuf: Uint8Array
@@ -194,21 +194,21 @@ class RS30X {
       }
     }
     this.#txBuf = new Uint8Array(64)
-    if (RS30X.packetHandler == null) {
-      RS30X.packetHandler = new PacketHandler({
+    if (packetHandler == null) {
+      packetHandler = new PacketHandler({
         receive: config.serial?.receive ?? 16,
         transmit: config.serial?.transmit ?? 17,
         baud: 115_200,
         port: 2,
       })
     }
-    if (RS30X.packetHandler.hasCallbackOf(id)) {
+    if (packetHandler.hasCallbackOf(id)) {
       throw new Error('This id is already instantiated')
     }
-    RS30X.packetHandler.registerCallback(this.#id, this.#onCommandRead)
+    packetHandler.registerCallback(this.#id, this.#onCommandRead)
   }
   teardown(): void {
-    RS30X.packetHandler.removeCallback(this.#id)
+    packetHandler.removeCallback(this.#id)
   }
 
   set id(_: number) {
@@ -236,7 +236,7 @@ class RS30X {
     // }
     // trace(']\n')
     for (let i = 0; i < idx; i++) {
-      RS30X.packetHandler.write(this.#txBuf[i])
+      packetHandler.write(this.#txBuf[i])
     }
     return new Promise((resolve, _reject) => {
       const id = Timer.set(() => {
